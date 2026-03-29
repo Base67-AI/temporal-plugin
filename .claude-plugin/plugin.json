@@ -2,7 +2,9 @@
   "name": "temporal-orchestrator",
   "version": "0.1.0",
   "description": "Durable workflow orchestration for Claude sub-agents via Temporal.io. Transparently intercepts Agent tool calls and routes them through Temporal workflows with retry, heartbeating, and full observability.",
-  "author": "Base67",
+  "author": {
+    "name": "Base67"
+  },
   "keywords": ["temporal", "orchestration", "workflows", "agents", "durable-execution"],
   "repository": "https://github.com/Base67-AI/base67"
 }

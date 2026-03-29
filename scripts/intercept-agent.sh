@@ -20,26 +20,33 @@ if [ "$TOOL_NAME" != "Agent" ]; then
   exit 0
 fi
 
+DESCRIPTION=$(echo "$INPUT" | jq -r '.tool_input.description // "unknown"')
+echo "[temporal-plugin] PreToolUse intercepted Agent call: $DESCRIPTION" >&2
+
 # Check if Temporal is built
 TEMPORAL_CLIENT="$PLUGIN_ROOT/lib/client.js"
 if [ ! -f "$TEMPORAL_CLIENT" ]; then
   # Temporal not built — pass through to native Agent tool
+  echo "[temporal-plugin] Temporal not built — falling back to native execution" >&2
   echo '{}'
   exit 0
 fi
 
 # Quick health check: can we reach the Temporal server?
 TEMPORAL_ADDR="${TEMPORAL_ADDRESS:-127.0.0.1:7233}"
-if ! timeout 2 node -e "
+if ! perl -e 'alarm 2; exec @ARGV' node -e "
   const { Connection } = require('$PLUGIN_ROOT/node_modules/@temporalio/client');
   Connection.connect({ address: '$TEMPORAL_ADDR' })
     .then(() => process.exit(0))
     .catch(() => process.exit(1));
 " 2>/dev/null; then
   # Temporal server not running — pass through
+  echo "[temporal-plugin] Temporal server not reachable — falling back to native execution" >&2
   echo '{}'
   exit 0
 fi
+
+echo "[temporal-plugin] Routing Agent call through Temporal workflow" >&2
 
 # Extract Agent tool parameters
 PROMPT=$(echo "$INPUT" | jq -r '.tool_input.prompt // empty')

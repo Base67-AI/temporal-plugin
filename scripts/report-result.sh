@@ -19,6 +19,9 @@ if [ "$TOOL_NAME" != "Agent" ]; then
   exit 0
 fi
 
+DESCRIPTION=$(echo "$INPUT" | jq -r '.tool_input.description // "unknown"')
+echo "[temporal-plugin] PostToolUse logging Agent result: $DESCRIPTION" >&2
+
 LOG_DIR="$PLUGIN_DATA"
 LOG_FILE="$LOG_DIR/agent-executions.jsonl"
 

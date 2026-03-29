@@ -17,7 +17,7 @@ fi
 
 # Check if Temporal server is reachable
 TEMPORAL_ADDR="${TEMPORAL_ADDRESS:-127.0.0.1:7233}"
-if timeout 2 node -e "
+if perl -e 'alarm 2; exec @ARGV' node -e "
   const { Connection } = require('$PLUGIN_ROOT/node_modules/@temporalio/client');
   Connection.connect({ address: '$TEMPORAL_ADDR' })
     .then(() => process.exit(0))
@@ -28,4 +28,5 @@ else
   echo "[temporal-plugin] Temporal server not reachable at $TEMPORAL_ADDR — Agent calls will use native execution"
 fi
 
+echo "[temporal-plugin] Hooks registered: PreToolUse(Agent), PostToolUse(Agent)" >&2
 echo '{}'
