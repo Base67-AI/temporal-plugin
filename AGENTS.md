@@ -1,12 +1,12 @@
 # Temporal Agent Orchestration
 
-> Durable workflow orchestration for Claude Code sub-agents via Temporal.io — packaged as a Claude Code plugin.
+> Durable workflow orchestration for Claude Code sub-agents using Temporal.io.
 
 ## At a Glance
 
 | | |
 |-|-|
-| **Type** | Claude Code Plugin + Infrastructure Layer |
+| **Type** | Infrastructure Layer |
 | **Owns** | Workflow definitions, activity wrappers, hook-based Agent interception, Temporal worker/client |
 | **Does NOT own** | Agent definitions (→ each layer), skill logic (→ each layer), game generation pipeline (→ gamebuilder/phasertemplate/playground) |
 | **Users** | All layers (transparently via hook interception) |
@@ -14,21 +14,6 @@
 ## Navigation
 
 ↑ Parent: [`../AGENTS.md`](../AGENTS.md)
-
-## Plugin Installation
-
-```bash
-# Option 1: Load for a single session
-claude --plugin-dir ./temporal
-
-# Option 2: Install at project scope (persists across sessions)
-# Register this directory as a plugin source in .claude/settings.json
-
-# Option 3: Standalone (without plugin system)
-cd temporal && npm install && npm run build
-```
-
-Once loaded as a plugin, the hooks, skills, and agents auto-register — no manual settings.json changes needed.
 
 ## Architecture
 
@@ -38,7 +23,7 @@ Temporal sits **beneath** all other layers as a transparent orchestration backbo
 Skill calls Agent tool (unchanged)
   → PreToolUse hook intercepts
     → Temporal workflow starts
-      → Activity spawns Claude Code CLI session
+      → Activity spawns Claude Code SDK session
         → Session runs with full tools/skills/file access
       ← Result returned
     ← Hook returns result to skill
@@ -48,29 +33,6 @@ Skill calls Agent tool (unchanged)
 ### Graceful Fallback
 
 If the Temporal server or worker isn't running, the hook passes through silently and the Agent tool executes natively. Zero disruption.
-
-## Plugin Structure
-
-```
-temporal/
-├── .claude-plugin/
-│   └── plugin.json          # Plugin manifest (name, version, description)
-├── hooks/
-│   └── hooks.json           # SessionStart, PreToolUse, PostToolUse hooks
-├── skills/
-│   ├── temporal-orchestrate/ # /temporal-orchestrate skill
-│   ├── temporal-pipeline/    # /temporal-pipeline skill
-│   ├── temporal-status/      # /temporal-status skill
-│   ├── temporal-developer/   # /temporal-developer expert knowledge
-│   └── temporal-cloud/       # /temporal-cloud troubleshooting
-├── scripts/
-│   ├── intercept-agent.sh   # PreToolUse: route Agent → Temporal
-│   ├── report-result.sh     # PostToolUse: audit logging
-│   └── setup.sh             # SessionStart: connectivity check
-├── src/                     # TypeScript source
-├── lib/                     # Compiled output (gitignored)
-└── package.json             # Dependencies
-```
 
 ## Entry Points
 
@@ -87,23 +49,19 @@ temporal/
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| Plugin Manifest | `.claude-plugin/plugin.json` | Plugin metadata for Claude Code |
-| Hook Config | `hooks/hooks.json` | Registers lifecycle hooks with Claude Code |
-| Intercept Script | `scripts/intercept-agent.sh` | PreToolUse: routes Agent → Temporal |
-| Report Script | `scripts/report-result.sh` | PostToolUse: audit logging |
-| Setup Script | `scripts/setup.sh` | SessionStart: connectivity check |
-| Claude Session Activity | `src/activities/claude-session.ts` | Spawns Claude Code CLI sessions as Temporal Activities |
+| Claude Session Activity | `src/activities/claude-session.ts` | Spawns Claude Code SDK sessions as Temporal Activities |
 | File Ops Activity | `src/activities/file-ops.ts` | File system operations as Activities |
 | Agent Session Workflow | `src/workflows/agent-session.ts` | Wraps single Agent calls durably |
 | Pipeline Workflow | `src/workflows/orchestrate.ts` | Multi-step with dependency ordering |
 | Parallel Workflow | `src/workflows/parallel-agents.ts` | Fan-out/fan-in for concurrent agents |
+| Interceptor Hook | `src/hooks/intercept-agent.sh` | PreToolUse hook routing Agent → Temporal |
+| Result Logger | `src/hooks/report-result.sh` | PostToolUse hook for audit logging |
 
 ## Invariants
 
 **MUST:** Gracefully fall back to native Agent tool when Temporal is unavailable.
 **MUST:** Heartbeat during Claude Code sessions so Temporal detects stuck activities.
 **MUST:** Use model-appropriate retry policies (Opus: 2 retries, Sonnet/Haiku: 3).
-**MUST:** Use `${CLAUDE_PLUGIN_ROOT}` for all paths in hook scripts (portability).
 **MUST NEVER:** Modify existing skill or agent definitions in other layers.
 **MUST NEVER:** Block the pipeline if Temporal infrastructure is down.
 
@@ -112,7 +70,7 @@ temporal/
 **Do:** Use `agentSessionWorkflow` for individual agent calls (hook default).
 **Do:** Use `orchestratePipeline` for multi-step pipelines with dependencies.
 **Do:** Use `parallelAgents` for concurrent independent agent work.
-**Don't:** Call Claude API directly — always go through the Claude Code CLI session activity.
+**Don't:** Call Claude API directly — always go through the Claude Code SDK session activity.
 
 ## Local Development
 
@@ -120,25 +78,26 @@ temporal/
 # 1. Start Temporal server (local dev)
 temporal server start-dev
 
-# 2. Install dependencies and build
-cd temporal && npm install && npm run build
+# 2. Install dependencies
+cd temporal && npm install
 
-# 3. Start worker
+# 3. Build
+npm run build
+
+# 4. Start worker
 npm run worker
 
-# 4. Load plugin in Claude Code
-claude --plugin-dir ./temporal
-# The hooks auto-activate when Temporal is available
+# 5. The hooks auto-activate when Temporal is available
 ```
 
 ## Observability
 
 - **Temporal UI:** `http://localhost:8233` — full workflow execution history
 - **Queries:** Real-time `currentStage` and `pipelineStatus` via Temporal queries
-- **Audit log:** `$CLAUDE_PLUGIN_DATA/agent-executions.jsonl` — local execution trail
+- **Audit log:** `temporal/.logs/agent-executions.jsonl` — local execution trail
 
 ## Dependencies
 
 **Requires:** Temporal server (local: `temporal server start-dev`, prod: Temporal Cloud)
-**Requires:** `claude` CLI in PATH for spawning Claude Code sessions
-**Breaks if changed:** `hooks/hooks.json` hook registration structure
+**Requires:** `claude-agent-sdk` for spawning Claude Code sessions
+**Breaks if changed:** Hook registration in `.claude/settings.json`
