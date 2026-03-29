@@ -9,8 +9,8 @@ import type { ActivityOptions } from '@temporalio/workflow';
 
 /** Opus: most capable, expensive — longer timeouts, fewer retries */
 export const opusPolicy: ActivityOptions = {
-  startToCloseTimeout: '15m',
-  heartbeatTimeout: '3m',
+  startToCloseTimeout: '30m',
+  heartbeatTimeout: '10m',
   retry: {
     maximumAttempts: 2,
     initialInterval: '10s',
@@ -21,8 +21,8 @@ export const opusPolicy: ActivityOptions = {
 
 /** Sonnet: balanced capability and cost */
 export const sonnetPolicy: ActivityOptions = {
-  startToCloseTimeout: '10m',
-  heartbeatTimeout: '2m',
+  startToCloseTimeout: '20m',
+  heartbeatTimeout: '10m',
   retry: {
     maximumAttempts: 3,
     initialInterval: '5s',
@@ -33,8 +33,8 @@ export const sonnetPolicy: ActivityOptions = {
 
 /** Haiku: fast, cheap — short timeouts, more retries */
 export const haikuPolicy: ActivityOptions = {
-  startToCloseTimeout: '5m',
-  heartbeatTimeout: '1m',
+  startToCloseTimeout: '10m',
+  heartbeatTimeout: '5m',
   retry: {
     maximumAttempts: 3,
     initialInterval: '3s',

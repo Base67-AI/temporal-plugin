@@ -55,10 +55,12 @@ export async function runClaudeSession(input: ClaudeSessionInput): Promise<Claud
 
   // Build claude CLI args
   // Use --output-format json for single-result mode (avoids --verbose requirement of stream-json)
-  // Use --permission-mode default; -p mode already skips workspace trust dialogs
+  // Use --permission-mode to control tool permissions for sub-agents
+  const permissionMode = input.permissionMode || 'acceptEdits';
   const args: string[] = [
     '-p', input.prompt,
     '--output-format', 'json',
+    '--permission-mode', permissionMode,
   ];
 
   if (input.maxTurns) {
@@ -80,7 +82,6 @@ export async function runClaudeSession(input: ClaudeSessionInput): Promise<Claud
   return new Promise<ClaudeSessionResult>((resolve) => {
     let output = '';
     let messageCount = 0;
-    let lastHeartbeat = Date.now();
 
     // Find claude binary
     const claudeBin = findClaudeBinary(cwd);
@@ -100,20 +101,24 @@ export async function runClaudeSession(input: ClaudeSessionInput): Promise<Claud
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
+    // Periodic heartbeat timer — ensures Temporal knows we're alive even when
+    // --output-format json produces no intermediate output during long sessions
+    const heartbeatInterval = setInterval(() => {
+      ctx.heartbeat({
+        messagesProcessed: messageCount,
+        description: input.description,
+        alive: true,
+      });
+    }, 30_000);
+
+    // Send initial heartbeat immediately
+    ctx.heartbeat({ messagesProcessed: 0, description: input.description, started: true });
+
     // Collect stdout (--output-format json returns a single JSON object)
     let rawStdout = '';
     proc.stdout?.on('data', (chunk: Buffer) => {
       rawStdout += chunk.toString();
       messageCount++;
-
-      // Heartbeat every 10 seconds at most
-      if (Date.now() - lastHeartbeat > 10_000) {
-        ctx.heartbeat({
-          messagesProcessed: messageCount,
-          description: input.description,
-        });
-        lastHeartbeat = Date.now();
-      }
     });
 
     let stderr = '';
@@ -122,6 +127,7 @@ export async function runClaudeSession(input: ClaudeSessionInput): Promise<Claud
     });
 
     proc.on('close', (code) => {
+      clearInterval(heartbeatInterval);
       // Parse JSON output from claude CLI
       try {
         const result = JSON.parse(rawStdout);
@@ -140,6 +146,7 @@ export async function runClaudeSession(input: ClaudeSessionInput): Promise<Claud
     });
 
     proc.on('error', (err) => {
+      clearInterval(heartbeatInterval);
       resolve({
         success: false,
         output: output.trim(),
