@@ -15,7 +15,6 @@
     "@temporalio/client": "^1.15.0",
     "@temporalio/worker": "^1.15.0",
     "@temporalio/workflow": "^1.15.0",
-    "claude-agent-sdk": "^0.1.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {

@@ -38,7 +38,7 @@ fi
 # Quick health check: can we reach the Temporal server?
 if ! timeout 2 node -e "
   const { Connection } = require('@temporalio/client');
-  Connection.connect({ address: '${TEMPORAL_ADDRESS:-localhost:7233}' })
+  Connection.connect({ address: '${TEMPORAL_ADDRESS:-127.0.0.1:7233}' })
     .then(() => process.exit(0))
     .catch(() => process.exit(1));
 " 2>/dev/null; then

@@ -1,5 +1,6 @@
 import { Context } from '@temporalio/activity';
-import { query, ClaudeAgentOptions, AssistantMessage, TextBlock } from 'claude-agent-sdk';
+import { spawn } from 'child_process';
+import path from 'path';
 
 /**
  * Input parameters for a Claude Code SDK session, mapping directly to
@@ -40,75 +41,134 @@ export interface ClaudeSessionResult {
 }
 
 /**
- * Core Temporal Activity: spawn a Claude Code SDK session.
+ * Core Temporal Activity: spawn a Claude Code session.
  *
- * Each call to this activity creates a full Claude Code session with file access,
- * tool use, skills, and agents — the complete Claude Code environment.
+ * Uses the @anthropic-ai/claude-code CLI to spawn a full Claude Code session
+ * with file access, tool use, skills, and agents.
  *
- * Heartbeats are sent on each streamed message so Temporal can detect stuck sessions
+ * Heartbeats are sent periodically so Temporal can detect stuck sessions
  * and trigger timeouts appropriately.
  */
 export async function runClaudeSession(input: ClaudeSessionInput): Promise<ClaudeSessionResult> {
   const ctx = Context.current();
+  const cwd = input.cwd || process.cwd();
 
-  const options: ClaudeAgentOptions = {
-    cwd: input.cwd || process.cwd(),
-    permission_mode: (input.permissionMode as 'acceptEdits' | undefined) || 'acceptEdits',
-  };
-
-  if (input.systemPrompt) {
-    options.system_prompt = input.systemPrompt;
-  }
-
-  if (input.allowedTools) {
-    options.allowed_tools = input.allowedTools;
-  }
+  // Build claude CLI args
+  // Use --output-format json for single-result mode (avoids --verbose requirement of stream-json)
+  // Use --permission-mode default; -p mode already skips workspace trust dialogs
+  const args: string[] = [
+    '-p', input.prompt,
+    '--output-format', 'json',
+  ];
 
   if (input.maxTurns) {
-    options.max_turns = input.maxTurns;
+    args.push('--max-turns', String(input.maxTurns));
   }
 
-  let output = '';
-  let messageCount = 0;
+  if (input.model) {
+    args.push('--model', input.model);
+  }
 
-  try {
-    for await (const message of query({ prompt: input.prompt, options })) {
+  if (input.systemPrompt) {
+    args.push('--append-system-prompt', input.systemPrompt);
+  }
+
+  if (input.allowedTools && input.allowedTools.length > 0) {
+    args.push('--allowed-tools', input.allowedTools.join(','));
+  }
+
+  return new Promise<ClaudeSessionResult>((resolve) => {
+    let output = '';
+    let messageCount = 0;
+    let lastHeartbeat = Date.now();
+
+    // Find claude binary
+    const claudeBin = findClaudeBinary(cwd);
+    const isAbsolutePath = claudeBin.startsWith('/');
+
+    // If it's a .js file, spawn with node; if it's a binary/symlink, spawn directly
+    const spawnCmd = isAbsolutePath && claudeBin.endsWith('.js')
+      ? process.execPath
+      : claudeBin;
+    const spawnArgs = isAbsolutePath && claudeBin.endsWith('.js')
+      ? [claudeBin, ...args]
+      : args;
+
+    const proc = spawn(spawnCmd, spawnArgs, {
+      cwd,
+      env: { ...process.env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    // Collect stdout (--output-format json returns a single JSON object)
+    let rawStdout = '';
+    proc.stdout?.on('data', (chunk: Buffer) => {
+      rawStdout += chunk.toString();
       messageCount++;
 
-      // Heartbeat on every message so Temporal knows we're alive
-      ctx.heartbeat({
-        messagesProcessed: messageCount,
-        description: input.description,
-      });
-
-      // Extract text content from assistant messages
-      if (isAssistantMessage(message)) {
-        for (const block of (message as AssistantMessage).content) {
-          if (isTextBlock(block)) {
-            output += (block as TextBlock).text + '\n';
-          }
-        }
+      // Heartbeat every 10 seconds at most
+      if (Date.now() - lastHeartbeat > 10_000) {
+        ctx.heartbeat({
+          messagesProcessed: messageCount,
+          description: input.description,
+        });
+        lastHeartbeat = Date.now();
       }
+    });
+
+    let stderr = '';
+    proc.stderr?.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+
+    proc.on('close', (code) => {
+      // Parse JSON output from claude CLI
+      try {
+        const result = JSON.parse(rawStdout);
+        output = typeof result.result === 'string'
+          ? result.result
+          : JSON.stringify(result.result);
+      } catch {
+        output = rawStdout.trim();
+      }
+
+      resolve({
+        success: code === 0,
+        output: output.trim(),
+        error: code !== 0 ? `Exit code ${code}: ${stderr.slice(0, 500)}` : undefined,
+      });
+    });
+
+    proc.on('error', (err) => {
+      resolve({
+        success: false,
+        output: output.trim(),
+        error: err.message,
+      });
+    });
+  });
+}
+
+/**
+ * Find the claude CLI binary, checking common locations.
+ */
+function findClaudeBinary(cwd: string): string {
+  const candidates = [
+    path.resolve(cwd, 'node_modules/@anthropic-ai/claude-code/cli.js'),
+    path.resolve(cwd, '../node_modules/@anthropic-ai/claude-code/cli.js'),
+    path.resolve(cwd, '../../node_modules/@anthropic-ai/claude-code/cli.js'),
+  ];
+
+  // Also check if claude is available globally
+  for (const candidate of candidates) {
+    try {
+      require.resolve(candidate);
+      return candidate;
+    } catch {
+      // Not found, try next
     }
-
-    return {
-      success: true,
-      output: output.trim(),
-    };
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    return {
-      success: false,
-      output: output.trim(),
-      error: errorMessage,
-    };
   }
-}
 
-function isAssistantMessage(msg: unknown): msg is AssistantMessage {
-  return typeof msg === 'object' && msg !== null && (msg as Record<string, unknown>).role === 'assistant';
-}
-
-function isTextBlock(block: unknown): block is TextBlock {
-  return typeof block === 'object' && block !== null && (block as Record<string, unknown>).type === 'text';
+  // Fallback: assume it's in PATH
+  return 'claude';
 }

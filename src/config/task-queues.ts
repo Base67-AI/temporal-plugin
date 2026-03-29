@@ -12,4 +12,4 @@ export const AGENT_ORCHESTRATION_QUEUE = 'agent-orchestration';
 export const TEMPORAL_NAMESPACE = 'default';
 
 /** Default Temporal server address for local development */
-export const TEMPORAL_ADDRESS = process.env.TEMPORAL_ADDRESS || 'localhost:7233';
+export const TEMPORAL_ADDRESS = process.env.TEMPORAL_ADDRESS || '127.0.0.1:7233';
