@@ -1,0 +1,1 @@
+{"root":["./src/client.ts","./src/worker.ts","./src/activities/claude-session.ts","./src/activities/file-ops.ts","./src/config/retry-policies.ts","./src/config/task-queues.ts","./src/workflows/agent-session.ts","./src/workflows/index.ts","./src/workflows/orchestrate.ts","./src/workflows/parallel-agents.ts","./src/workflows/signals-queries.ts"],"version":"5.9.3"}
