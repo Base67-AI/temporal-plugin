@@ -37,9 +37,10 @@ Session end  → teardown.sh signals workflow shutdown, kills auto-launched proc
 ## Patterns and Rules
 
 - **Workflow code must be deterministic** — no I/O, no Date.now(), no Math.random(). Use `import type` only.
+- **`proxyActivities()` at workflow scope only** — NEVER call it inside signal/update/query handlers. Use the queue-based pattern: handler enqueues tasks, main loop runs activities.
 - **Activities do the real work** — file I/O, spawning processes, API calls happen in activities only.
 - **Graceful fallback** — every hook returns `{}` on failure, letting native Agent execution proceed.
-- **Model-aware retries** — `getPolicyForModel()` in `src/config/retry-policies.ts` selects timeout/retry config.
+- **Model-aware retries** — three pre-created activity stubs (opus/sonnet/haiku) with different policies.
 - **Auto-launch is opt-in** — set `TEMPORAL_AUTO_LAUNCH=true` to auto-start server + worker.
 
 ## Available Skills

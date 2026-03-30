@@ -117,6 +117,7 @@ If the Temporal server or worker isn't running, every hook returns `{}` and the 
 - Use `parallelAgents` for concurrent independent agent work
 - Always go through the Claude Code CLI activity — never call Claude API directly
 - Workflow code must be deterministic (no I/O, no random, no Date.now())
+- **`proxyActivities()` at workflow scope only** — never inside handlers. The session workflow uses a queue-based pattern: update handler enqueues tasks and waits via `condition()`, main loop dequeues and runs activities at workflow scope
 
 ## Configuration
 

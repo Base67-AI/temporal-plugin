@@ -67,28 +67,60 @@ When Claude Code exits, the `Stop` hook (`scripts/teardown.sh`) runs:
 
 The primary workflow. One instance per Claude session.
 
+Uses a **queue-based decoupling pattern** to keep `proxyActivities()` at the correct workflow scope:
+
 ```typescript
 // Simplified — see src/workflows/agent-session.ts for full code
 async function sessionWorkflow(input: SessionWorkflowInput): Promise<void> {
-  // Update handler: each Agent call triggers this
+  // Activity stubs created at WORKFLOW SCOPE (required by Temporal SDK)
+  const opusActs = proxyActivities<...>(opusPolicy);
+  const sonnetActs = proxyActivities<...>(sonnetPolicy);
+  const haikuActs = proxyActivities<...>(haikuPolicy);
+
+  const taskQueue: PendingTask[] = [];
+  const taskResults = new Map<number, { result?, error? }>();
+
+  // Update handler: enqueues task, waits for result (does NOT run activities)
   setHandler(executeAgentTaskUpdate, async (taskInput) => {
-    const { runClaudeSession } = proxyActivities(getPolicyForModel(taskInput.model));
-    return await runClaudeSession(taskInput);  // runs as Temporal activity
+    const taskId = ++taskCount;
+    taskQueue.push({ id: taskId, input: taskInput });
+    await condition(() => taskResults.has(taskId));  // cooperative yield
+    const outcome = taskResults.get(taskId)!;
+    taskResults.delete(taskId);
+    if (outcome.error) throw outcome.error;
+    return outcome.result!;
   });
 
-  // Shutdown handler
-  setHandler(shutdownSignal, () => { shuttingDown = true; });
-
-  // Stay alive until shutdown or 24h timeout
-  await condition(() => shuttingDown, '24h');
+  // Main loop: processes tasks at workflow scope using pre-created stubs
+  while (!shuttingDown) {
+    await condition(() => taskQueue.length > 0 || shuttingDown);
+    if (shuttingDown) break;
+    const task = taskQueue.shift()!;
+    try {
+      const result = await getActivities(task.input.model).runClaudeSession(task.input);
+      taskResults.set(task.id, { result });
+    } catch (err) {
+      taskResults.set(task.id, { error: err });
+    }
+  }
 }
 ```
 
+How the cooperative coroutine pattern works:
+1. Update handler pushes a task to the queue and calls `await condition()` — this **yields** control
+2. The main loop's `condition(() => taskQueue.length > 0)` resolves, it dequeues the task
+3. The activity runs at workflow scope (correct for `proxyActivities`)
+4. Result is stored in the map, which satisfies the handler's `condition(() => taskResults.has(taskId))`
+5. Handler resumes, returns the result to the client
+
 Key properties:
-- **Long-running**: lives for the entire Claude session
+- **Long-running**: lives for the entire Claude session (main loop keeps iterating)
 - **Update-driven**: each Agent call is a Temporal Update (request-response)
+- **Correct scoping**: `proxyActivities()` called at workflow function scope, never inside handlers
 - **Stateful**: tracks task count and current status via queries
-- **Self-cleaning**: 24h timeout prevents zombie workflows
+- **Self-cleaning**: workflow exits when shutdown signal arrives
+
+> **Important rule**: In Temporal SDK, `proxyActivities()` must ALWAYS be called at workflow function scope. Calling it inside signal/update/query handlers corrupts the workflow execution context.
 
 ### Pipeline Workflow (`orchestratePipeline`)
 
