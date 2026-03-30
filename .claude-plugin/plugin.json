@@ -5,6 +5,8 @@
   "author": {
     "name": "Base67"
   },
-  "keywords": ["temporal", "orchestration", "workflows", "agents", "durable-execution"],
-  "repository": "https://github.com/Base67-AI/base67"
+  "license": "MIT",
+  "homepage": "https://github.com/Base67-AI/temporal-plugin",
+  "repository": "https://github.com/Base67-AI/temporal-plugin",
+  "keywords": ["temporal", "orchestration", "workflows", "agents", "durable-execution"]
 }

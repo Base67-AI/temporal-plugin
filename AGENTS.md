@@ -8,132 +8,127 @@
 |-|-|
 | **Type** | Claude Code Plugin + Infrastructure Layer |
 | **Owns** | Workflow definitions, activity wrappers, hook-based Agent interception, Temporal worker/client |
-| **Does NOT own** | Agent definitions (→ each layer), skill logic (→ each layer), game generation pipeline (→ gamebuilder/phasertemplate/playground) |
+| **Does NOT own** | Agent definitions, skill logic, application pipelines |
 | **Users** | All layers (transparently via hook interception) |
-
-## Plugin Installation
-
-```bash
-# Clone the plugin
-git clone https://github.com/Base67-AI/temporal-plugin.git
-
-# Option 1: Load for a single session
-claude --plugin-dir ./temporal-plugin
-
-# Option 2: Standalone (without plugin system)
-cd temporal-plugin && npm install && npm run build
-```
-
-Once loaded as a plugin, the hooks, skills, and agents auto-register — no manual settings.json changes needed.
 
 ## Architecture
 
-Temporal sits **beneath** all other layers as a transparent orchestration backbone. Existing skills and agents are unaware of it — a PreToolUse hook intercepts Agent tool calls and routes them through Temporal workflows.
+A single **session workflow** starts when Claude Code launches and stays alive for the entire session. Every Agent tool call is intercepted by a PreToolUse hook and dispatched as a Temporal **activity** inside that workflow via Workflow Updates (request-response).
 
 ```
-Skill calls Agent tool (unchanged)
-  → PreToolUse hook intercepts
-    → Temporal workflow starts
-      → Activity spawns Claude Code CLI session
-        → Session runs with full tools/skills/file access
-      ← Result returned
-    ← Hook returns result to skill
-  → Skill continues normally
+SessionStart hook (setup.sh)
+  ├─ [optional] Auto-launch Temporal dev server + worker
+  └─ Start sessionWorkflow → persist workflow ID
+
+Agent tool call (intercept-agent.sh)
+  └─ Read workflow ID → executeUpdate(executeAgentTask, input)
+      └─ sessionWorkflow runs runClaudeSession activity
+          └─ Spawns `claude` CLI → collects result
+      └─ Returns ClaudeSessionResult to hook → back to caller
+
+Stop hook (teardown.sh)
+  ├─ Signal sessionWorkflow to shut down
+  └─ Kill auto-launched processes (worker, dev server)
 ```
 
 ### Graceful Fallback
 
-If the Temporal server or worker isn't running, the hook passes through silently and the Agent tool executes natively. Zero disruption.
+If the Temporal server or worker isn't running, every hook returns `{}` and the Agent tool executes natively. Zero disruption.
 
 ## Plugin Structure
 
 ```
 ├── .claude-plugin/
-│   └── plugin.json          # Plugin manifest (name, version, description)
+│   └── plugin.json              # Plugin manifest
 ├── hooks/
-│   └── hooks.json           # SessionStart, PreToolUse, PostToolUse hooks
+│   └── hooks.json               # SessionStart, PreToolUse, PostToolUse, Stop
 ├── skills/
-│   ├── temporal-orchestrate/ # /temporal-orchestrate skill
-│   ├── temporal-pipeline/    # /temporal-pipeline skill
-│   ├── temporal-status/      # /temporal-status skill
-│   ├── temporal-developer/   # /temporal-developer expert knowledge
-│   └── temporal-cloud/       # /temporal-cloud troubleshooting
+│   ├── temporal-orchestrate/    # /temporal-orchestrate — run agents and pipelines
+│   ├── temporal-pipeline/       # /temporal-pipeline — build pipeline definitions
+│   ├── temporal-status/         # /temporal-status — check workflow status
+│   ├── temporal-developer/      # /temporal-developer — Temporal dev reference
+│   └── temporal-cloud/          # /temporal-cloud — Cloud troubleshooting
 ├── scripts/
-│   ├── intercept-agent.sh   # PreToolUse: route Agent → Temporal
-│   ├── report-result.sh     # PostToolUse: audit logging
-│   └── setup.sh             # SessionStart: connectivity check
-├── src/                     # TypeScript source
-├── lib/                     # Compiled output (gitignored)
-└── package.json             # Dependencies
+│   ├── setup.sh                 # SessionStart: auto-launch + session workflow
+│   ├── intercept-agent.sh       # PreToolUse: route Agent → session workflow
+│   ├── report-result.sh         # PostToolUse: audit logging
+│   └── teardown.sh              # Stop: shutdown + cleanup
+├── src/
+│   ├── workflows/
+│   │   ├── agent-session.ts     # sessionWorkflow + legacy agentSessionWorkflow
+│   │   ├── orchestrate.ts       # Multi-step pipeline with DAG execution
+│   │   ├── parallel-agents.ts   # Fan-out/fan-in concurrent execution
+│   │   ├── signals-queries.ts   # Shared signals, queries, and updates
+│   │   └── index.ts             # Workflow exports for worker
+│   ├── activities/
+│   │   ├── claude-session.ts    # Core: spawns Claude CLI with heartbeating
+│   │   └── file-ops.ts          # File read/write utilities
+│   ├── config/
+│   │   ├── retry-policies.ts    # Model-tier retry policies
+│   │   └── task-queues.ts       # Queue and address constants
+│   ├── client.ts                # CLI tool for workflow management
+│   └── worker.ts                # Worker process (polls task queue)
+├── docs/                        # Guides and reference documentation
+├── CLAUDE.md                    # Claude Code context (auto-loaded)
+├── package.json                 # Dependencies and scripts
+└── README.md                    # User-facing quick start
 ```
-
-## Entry Points
-
-| Command | Purpose |
-|---------|---------|
-| `npm run worker` | Start the Temporal worker (polls for tasks) |
-| `npm run client start-agent -- --prompt "..."` | Start a single agent session workflow |
-| `npm run client start-pipeline -- --definition @pipeline.json` | Start a multi-step pipeline |
-| `npm run client status <workflow-id>` | Query workflow status |
-| `npm run client cancel <workflow-id>` | Cancel a running workflow |
-| `npm run client list` | List recent workflows |
 
 ## Key Components
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| Plugin Manifest | `.claude-plugin/plugin.json` | Plugin metadata for Claude Code |
-| Hook Config | `hooks/hooks.json` | Registers lifecycle hooks with Claude Code |
-| Intercept Script | `scripts/intercept-agent.sh` | PreToolUse: routes Agent → Temporal |
-| Report Script | `scripts/report-result.sh` | PostToolUse: audit logging |
-| Setup Script | `scripts/setup.sh` | SessionStart: connectivity check |
-| Claude Session Activity | `src/activities/claude-session.ts` | Spawns Claude Code CLI sessions as Temporal Activities |
-| File Ops Activity | `src/activities/file-ops.ts` | File system operations as Activities |
-| Agent Session Workflow | `src/workflows/agent-session.ts` | Wraps single Agent calls durably |
-| Pipeline Workflow | `src/workflows/orchestrate.ts` | Multi-step with dependency ordering |
+| Session Workflow | `src/workflows/agent-session.ts` | Long-running per-session, dispatches activities via Update handler |
+| Pipeline Workflow | `src/workflows/orchestrate.ts` | Multi-step with topological dependency ordering |
 | Parallel Workflow | `src/workflows/parallel-agents.ts` | Fan-out/fan-in for concurrent agents |
+| Claude Session Activity | `src/activities/claude-session.ts` | Spawns `claude` CLI, heartbeats every 30s |
+| Retry Policies | `src/config/retry-policies.ts` | Opus: 30m/2 retries, Sonnet: 20m/3, Haiku: 10m/3 |
+| Client CLI | `src/client.ts` | start-session, send-task, shutdown-session, start-agent, start-pipeline |
+| Setup Hook | `scripts/setup.sh` | Auto-launch + connectivity check + session start |
+| Intercept Hook | `scripts/intercept-agent.sh` | Routes Agent calls through session workflow |
+| Teardown Hook | `scripts/teardown.sh` | Shutdown workflow + kill auto-launched processes |
+
+## Entry Points (CLI Commands)
+
+| Command | Purpose |
+|---------|---------|
+| `npm run worker` | Start the Temporal worker |
+| `npm run client start-session` | Start a session workflow |
+| `npm run client send-task -- --workflow-id ... --prompt "..."` | Send task to session |
+| `npm run client shutdown-session -- --workflow-id ...` | Shut down session |
+| `npm run client start-agent -- --prompt "..."` | Single agent workflow (legacy) |
+| `npm run client start-pipeline -- --definition @pipeline.json` | Multi-step pipeline |
+| `npm run client status <workflow-id>` | Query workflow status |
+| `npm run client list` | List recent workflows |
 
 ## Invariants
 
-**MUST:** Gracefully fall back to native Agent tool when Temporal is unavailable.
-**MUST:** Heartbeat during Claude Code sessions so Temporal detects stuck activities.
-**MUST:** Use model-appropriate retry policies (Opus: 2 retries, Sonnet/Haiku: 3).
-**MUST:** Use `${CLAUDE_PLUGIN_ROOT}` for all paths in hook scripts (portability).
-**MUST NEVER:** Modify existing skill or agent definitions in other layers.
-**MUST NEVER:** Block the pipeline if Temporal infrastructure is down.
+- **MUST** fall back gracefully to native Agent tool when Temporal is unavailable
+- **MUST** heartbeat during Claude Code sessions so Temporal detects stuck activities
+- **MUST** use model-appropriate retry policies via `getPolicyForModel()`
+- **MUST** use `${CLAUDE_PLUGIN_ROOT}` for all paths in hook scripts
+- **MUST NEVER** block the session if Temporal infrastructure is down
+- **MUST NEVER** modify existing skill or agent definitions in other layers
 
 ## Patterns
 
-**Do:** Use `agentSessionWorkflow` for individual agent calls (hook default).
-**Do:** Use `orchestratePipeline` for multi-step pipelines with dependencies.
-**Do:** Use `parallelAgents` for concurrent independent agent work.
-**Don't:** Call Claude API directly — always go through the Claude Code CLI session activity.
+- Use `sessionWorkflow` for per-session agent orchestration (hook default)
+- Use `orchestratePipeline` for multi-step pipelines with dependencies
+- Use `parallelAgents` for concurrent independent agent work
+- Always go through the Claude Code CLI activity — never call Claude API directly
+- Workflow code must be deterministic (no I/O, no random, no Date.now())
 
-## Local Development
+## Configuration
 
-```bash
-# 1. Start Temporal server (local dev)
-temporal server start-dev
-
-# 2. Install dependencies and build
-npm install && npm run build
-
-# 3. Start worker
-npm run worker
-
-# 4. Load plugin in Claude Code
-claude --plugin-dir /path/to/temporal-plugin
-# The hooks auto-activate when Temporal is available
-```
+| Env Var | Default | Purpose |
+|---------|---------|---------|
+| `TEMPORAL_AUTO_LAUNCH` | `false` | Auto-start worker (and local dev server if needed) |
+| `TEMPORAL_ADDRESS` | `127.0.0.1:7233` | Temporal server address |
+| `TEMPORAL_AUTO_LAUNCH_UI_PORT` | `8233` | Dev server UI port |
 
 ## Observability
 
-- **Temporal UI:** `http://localhost:8233` — full workflow execution history
-- **Queries:** Real-time `currentStage` and `pipelineStatus` via Temporal queries
-- **Audit log:** `$CLAUDE_PLUGIN_DATA/agent-executions.jsonl` — local execution trail
-
-## Dependencies
-
-**Requires:** Temporal server (local: `temporal server start-dev`, prod: Temporal Cloud)
-**Requires:** `claude` CLI in PATH for spawning Claude Code sessions
-**Breaks if changed:** `hooks/hooks.json` hook registration structure
+- **Temporal UI:** `http://localhost:8233` — workflow execution history
+- **Queries:** `currentStage`, `pipelineStatus`, `pipelineLog`
+- **Signals:** `shutdown`, `cancel`, `pause`, `resume`
+- **Audit log:** `$CLAUDE_PLUGIN_DATA/agent-executions.jsonl`

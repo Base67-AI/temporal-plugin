@@ -1,0 +1,18 @@
+{
+  "name": "temporal-orchestrator-marketplace",
+  "owner": {
+    "name": "Base67"
+  },
+  "plugins": [
+    {
+      "name": "temporal-orchestrator",
+      "description": "Durable workflow orchestration for Claude sub-agents via Temporal.io with retry, heartbeating, and full observability.",
+      "source": {
+        "source": "github",
+        "repo": "Base67-AI/temporal-plugin"
+      },
+      "version": "0.1.0",
+      "keywords": ["temporal", "orchestration", "workflows", "agents", "durable-execution"]
+    }
+  ]
+}
