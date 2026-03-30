@@ -9,7 +9,7 @@ All configuration is done through environment variables. No config files to mana
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `TEMPORAL_ADDRESS` | `127.0.0.1:7233` | Temporal server gRPC address |
-| `TEMPORAL_AUTO_LAUNCH` | `false` | Auto-start infrastructure on session start |
+| `TEMPORAL_AUTO_LAUNCH` | `true` | Auto-start infrastructure on session start (set `false` to disable) |
 | `TEMPORAL_AUTO_LAUNCH_UI_PORT` | `8233` | Temporal Web UI port (local dev server only) |
 
 ### Plugin System (Set by Claude Code)

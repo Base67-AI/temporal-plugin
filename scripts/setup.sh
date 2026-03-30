@@ -6,7 +6,7 @@
 # session workflow that persists for the session.
 #
 # Configuration:
-#   TEMPORAL_AUTO_LAUNCH=true     — Auto-start worker (and local dev server if needed)
+#   TEMPORAL_AUTO_LAUNCH=false    — Set to 'false' to disable auto-start (default: true)
 #   TEMPORAL_ADDRESS=host:port    — Temporal server address (default: 127.0.0.1:7233)
 #                                   Set this to your Temporal Cloud or remote address
 #                                   to skip local dev server and only auto-start the worker.
@@ -26,7 +26,7 @@ mkdir -p "$PLUGIN_DATA"
 if [ ! -f "$PLUGIN_ROOT/lib/client.js" ]; then
   echo "[temporal-plugin] First run — installing dependencies and building..." >&2
   if command -v npm &>/dev/null; then
-    (cd "$PLUGIN_ROOT" && npm install --no-fund --no-audit 2>&1 | tail -1 >&2 && npm run build 2>&1 | tail -1 >&2) || {
+    (cd "$PLUGIN_ROOT" && npm install --no-fund --no-audit >&2 2>&1 && npm run build >&2 2>&1) || {
       echo "[temporal-plugin] Build failed — Agent calls will use native execution" >&2
       echo '{}'
       exit 0
@@ -40,7 +40,7 @@ if [ ! -f "$PLUGIN_ROOT/lib/client.js" ]; then
 fi
 
 # --- Auto-launch (optional) ---
-if [ "${TEMPORAL_AUTO_LAUNCH:-false}" = "true" ]; then
+if [ "${TEMPORAL_AUTO_LAUNCH:-true}" = "true" ]; then
   echo "[temporal-plugin] Auto-launch enabled" >&2
 
   # Check if Temporal server is already reachable (Temporal Cloud, remote, or already running locally)

@@ -123,7 +123,7 @@ If the Temporal server or worker isn't running, every hook returns `{}` and the 
 
 | Env Var | Default | Purpose |
 |---------|---------|---------|
-| `TEMPORAL_AUTO_LAUNCH` | `false` | Auto-start worker (and local dev server if needed) |
+| `TEMPORAL_AUTO_LAUNCH` | `true` | Auto-start worker and local dev server (set `false` to disable) |
 | `TEMPORAL_ADDRESS` | `127.0.0.1:7233` | Temporal server address |
 | `TEMPORAL_AUTO_LAUNCH_UI_PORT` | `8233` | Dev server UI port |
 
