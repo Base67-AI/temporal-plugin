@@ -22,11 +22,21 @@ UI_PORT="${TEMPORAL_AUTO_LAUNCH_UI_PORT:-8233}"
 
 mkdir -p "$PLUGIN_DATA"
 
-# Check if built
+# Auto-install and build if needed (e.g., first run after marketplace install)
 if [ ! -f "$PLUGIN_ROOT/lib/client.js" ]; then
-  echo "[temporal-plugin] Not built. Run: cd $PLUGIN_ROOT && npm install && npm run build"
-  echo '{}'
-  exit 0
+  echo "[temporal-plugin] First run — installing dependencies and building..." >&2
+  if command -v npm &>/dev/null; then
+    (cd "$PLUGIN_ROOT" && npm install --no-fund --no-audit 2>&1 | tail -1 >&2 && npm run build 2>&1 | tail -1 >&2) || {
+      echo "[temporal-plugin] Build failed — Agent calls will use native execution" >&2
+      echo '{}'
+      exit 0
+    }
+    echo "[temporal-plugin] Build complete" >&2
+  else
+    echo "[temporal-plugin] npm not found — cannot build. Run: cd $PLUGIN_ROOT && npm install && npm run build" >&2
+    echo '{}'
+    exit 0
+  fi
 fi
 
 # --- Auto-launch (optional) ---
