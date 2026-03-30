@@ -1,7 +1,8 @@
 import { Client, Connection } from '@temporalio/client';
-import { agentSessionWorkflow } from './workflows/agent-session';
+import { sessionWorkflow, agentSessionWorkflow } from './workflows/agent-session';
 import { orchestratePipeline, type PipelineDefinition } from './workflows/orchestrate';
 import { parallelAgents } from './workflows/parallel-agents';
+import { executeAgentTaskUpdate, shutdownSignal } from './workflows/signals-queries';
 import type { ClaudeSessionInput } from './activities/claude-session';
 import { AGENT_ORCHESTRATION_QUEUE, TEMPORAL_ADDRESS, TEMPORAL_NAMESPACE } from './config/task-queues';
 
@@ -11,7 +12,10 @@ import { AGENT_ORCHESTRATION_QUEUE, TEMPORAL_ADDRESS, TEMPORAL_NAMESPACE } from 
  * Used by the hook interceptor and for manual workflow management.
  *
  * Commands:
- *   start-agent     Start a single agent session workflow
+ *   start-session   Start a long-running session workflow (called by SessionStart hook)
+ *   send-task       Send an agent task to a running session workflow (called by PreToolUse hook)
+ *   shutdown-session Signal a session workflow to shut down (called by Stop hook)
+ *   start-agent     Start a single agent session workflow (legacy)
  *   start-pipeline  Start a multi-step pipeline workflow
  *   status          Query workflow status
  *   cancel          Cancel a running workflow
@@ -28,7 +32,67 @@ function generateWorkflowId(prefix: string): string {
 }
 
 /**
- * Start a single agent session — the primary entry point used by the hook.
+ * Start a long-running session workflow — called once by the SessionStart hook.
+ * The workflow stays alive for the session duration, receiving agent tasks via updates.
+ */
+async function startSession(args: Record<string, string>): Promise<void> {
+  const client = await getClient();
+  const workflowId = args['workflow-id'] || generateWorkflowId('session');
+
+  await client.workflow.start(sessionWorkflow, {
+    taskQueue: AGENT_ORCHESTRATION_QUEUE,
+    workflowId,
+    args: [{ sessionId: workflowId, cwd: args.cwd || process.cwd() }],
+    workflowExecutionTimeout: '24h',
+  });
+
+  console.log(JSON.stringify({ workflowId, status: 'started' }));
+}
+
+/**
+ * Send an agent task to a running session workflow via Temporal Update.
+ * Blocks until the activity completes and returns the result.
+ */
+async function sendTask(args: Record<string, string>): Promise<void> {
+  const client = await getClient();
+  const workflowId = args['workflow-id'];
+  if (!workflowId) {
+    console.error('Error: --workflow-id is required');
+    process.exit(1);
+  }
+
+  const input: ClaudeSessionInput = {
+    prompt: args.prompt || '',
+    description: args.description || 'agent-session',
+    cwd: args.cwd || process.cwd(),
+    model: args.model || undefined,
+    maxTurns: args['max-turns'] ? parseInt(args['max-turns'], 10) : undefined,
+    subagentType: args['subagent-type'] || undefined,
+  };
+
+  const handle = client.workflow.getHandle(workflowId);
+  const result = await handle.executeUpdate(executeAgentTaskUpdate, { args: [input] });
+  console.log(JSON.stringify({ workflowId, ...result }));
+}
+
+/**
+ * Signal a session workflow to shut down gracefully.
+ */
+async function shutdownSession(args: Record<string, string>): Promise<void> {
+  const client = await getClient();
+  const workflowId = args['workflow-id'] || args._positional || '';
+  if (!workflowId) {
+    console.error('Error: --workflow-id is required');
+    process.exit(1);
+  }
+
+  const handle = client.workflow.getHandle(workflowId);
+  await handle.signal(shutdownSignal);
+  console.log(JSON.stringify({ workflowId, action: 'shutdown-signalled' }));
+}
+
+/**
+ * Start a single agent session — legacy entry point.
  */
 async function startAgent(args: Record<string, string>): Promise<void> {
   const client = await getClient();
@@ -190,6 +254,15 @@ async function main(): Promise<void> {
   const { command, args } = parseArgs(process.argv);
 
   switch (command) {
+    case 'start-session':
+      await startSession(args);
+      break;
+    case 'send-task':
+      await sendTask(args);
+      break;
+    case 'shutdown-session':
+      await shutdownSession(args);
+      break;
     case 'start-agent':
       await startAgent(args);
       break;
@@ -210,6 +283,9 @@ async function main(): Promise<void> {
 Temporal Agent Orchestration CLI
 
 Commands:
+  start-session   [--workflow-id ...] [--cwd ...]        Start a session workflow
+  send-task       --workflow-id ... --prompt "..." ...    Send agent task to session
+  shutdown-session --workflow-id ...                      Shut down session workflow
   start-agent     --prompt "..." --description "..." [--model opus] [--workflow-id ...]
   start-pipeline  --definition '{"name":"...","steps":[...],"workingDirectory":"..."}'
   status          <workflow-id>

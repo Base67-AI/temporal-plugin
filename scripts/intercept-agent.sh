@@ -1,13 +1,14 @@
 #!/bin/bash
-# PreToolUse Hook: Intercept Agent tool calls and route through Temporal
+# PreToolUse Hook: Intercept Agent tool calls and route through the session workflow
 #
-# This hook transparently redirects Agent tool invocations to Temporal workflows.
-# If Temporal is not available, it passes through silently (graceful fallback).
+# Instead of creating a new workflow per Agent call, this hook sends the task
+# to the long-running session workflow via the `send-task` client command.
+# If no session workflow is running, it falls back to native execution.
 
 set -euo pipefail
 
-# Plugin root (set by Claude Code plugin system, or fallback to script dir)
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-$PLUGIN_ROOT/.logs}"
 
 # Read hook input from stdin (JSON with tool_name, tool_input, etc.)
 INPUT=$(cat)
@@ -23,45 +24,36 @@ fi
 DESCRIPTION=$(echo "$INPUT" | jq -r '.tool_input.description // "unknown"')
 echo "[temporal-plugin] PreToolUse intercepted Agent call: $DESCRIPTION" >&2
 
-# Check if Temporal is built
+# Check if Temporal client is built
 TEMPORAL_CLIENT="$PLUGIN_ROOT/lib/client.js"
 if [ ! -f "$TEMPORAL_CLIENT" ]; then
-  # Temporal not built — pass through to native Agent tool
   echo "[temporal-plugin] Temporal not built — falling back to native execution" >&2
   echo '{}'
   exit 0
 fi
 
-# Quick health check: can we reach the Temporal server?
-TEMPORAL_ADDR="${TEMPORAL_ADDRESS:-127.0.0.1:7233}"
-if ! perl -e 'alarm 2; exec @ARGV' node -e "
-  const { Connection } = require('$PLUGIN_ROOT/node_modules/@temporalio/client');
-  Connection.connect({ address: '$TEMPORAL_ADDR' })
-    .then(() => process.exit(0))
-    .catch(() => process.exit(1));
-" 2>/dev/null; then
-  # Temporal server not running — pass through
-  echo "[temporal-plugin] Temporal server not reachable — falling back to native execution" >&2
+# Read session workflow ID (persisted by setup.sh on SessionStart)
+SESSION_WF_FILE="$PLUGIN_DATA/session-workflow-id"
+if [ ! -f "$SESSION_WF_FILE" ]; then
+  echo "[temporal-plugin] No session workflow found — falling back to native execution" >&2
   echo '{}'
   exit 0
 fi
 
-echo "[temporal-plugin] Routing Agent call through Temporal workflow" >&2
+SESSION_WF_ID=$(cat "$SESSION_WF_FILE")
+
+echo "[temporal-plugin] Routing Agent call through session workflow: $SESSION_WF_ID" >&2
 
 # Extract Agent tool parameters
 PROMPT=$(echo "$INPUT" | jq -r '.tool_input.prompt // empty')
 DESCRIPTION=$(echo "$INPUT" | jq -r '.tool_input.description // "agent-session"')
 MODEL=$(echo "$INPUT" | jq -r '.tool_input.model // empty')
 SUBAGENT_TYPE=$(echo "$INPUT" | jq -r '.tool_input.subagent_type // empty')
-RUN_BG=$(echo "$INPUT" | jq -r '.tool_input.run_in_background // "false"')
 
-# Generate unique workflow ID
-WORKFLOW_ID="agent-$(date +%s)-$(head -c 4 /dev/urandom | xxd -p)"
-
-# Build client args
+# Build client args for send-task
 CLIENT_ARGS=(
-  "start-agent"
-  "--workflow-id" "$WORKFLOW_ID"
+  "send-task"
+  "--workflow-id" "$SESSION_WF_ID"
   "--prompt" "$PROMPT"
   "--description" "$DESCRIPTION"
 )
@@ -74,14 +66,10 @@ if [ -n "$SUBAGENT_TYPE" ]; then
   CLIENT_ARGS+=("--subagent-type" "$SUBAGENT_TYPE")
 fi
 
-if [ "$RUN_BG" = "true" ]; then
-  CLIENT_ARGS+=("--background" "true")
-fi
-
-# Execute via Temporal client
+# Execute via Temporal client — blocks until the activity completes within the session workflow
+TEMPORAL_ADDR="${TEMPORAL_ADDRESS:-127.0.0.1:7233}"
 RESULT=$(cd "$PLUGIN_ROOT" && TEMPORAL_ADDRESS="$TEMPORAL_ADDR" node lib/client.js "${CLIENT_ARGS[@]}" 2>&1) || {
-  # If Temporal execution fails, pass through to native Agent tool
-  echo '{}' >&2
+  echo "[temporal-plugin] send-task failed — falling back to native execution" >&2
   echo '{}'
   exit 0
 }

@@ -5,6 +5,6 @@
  * This file is the bundle entry that the worker uses to discover available workflows.
  */
 
-export { agentSessionWorkflow } from './agent-session';
+export { sessionWorkflow, agentSessionWorkflow } from './agent-session';
 export { orchestratePipeline } from './orchestrate';
 export { parallelAgents } from './parallel-agents';

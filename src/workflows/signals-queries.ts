@@ -1,10 +1,12 @@
-import { defineQuery, defineSignal } from '@temporalio/workflow';
+import { defineQuery, defineSignal, defineUpdate } from '@temporalio/workflow';
+import type { ClaudeSessionInput, ClaudeSessionResult } from '../activities/claude-session';
 
 /**
- * Shared signal and query definitions used across all orchestration workflows.
+ * Shared signal, query, and update definitions used across all orchestration workflows.
  *
  * Queries provide real-time observability into running workflows.
  * Signals enable external control (cancellation, pause/resume).
+ * Updates provide request-response semantics for dispatching activities.
  */
 
 /** Query: get the current pipeline stage (e.g., "design", "code", "validate") */
@@ -24,6 +26,12 @@ export const pauseSignal = defineSignal('pause');
 
 /** Signal: resume a paused pipeline */
 export const resumeSignal = defineSignal('resume');
+
+/** Signal: shut down the session workflow gracefully */
+export const shutdownSignal = defineSignal('shutdown');
+
+/** Update: execute an agent task as an activity within the session workflow (request-response) */
+export const executeAgentTaskUpdate = defineUpdate<ClaudeSessionResult, [ClaudeSessionInput]>('executeAgentTask');
 
 export type StageStatus = 'pending' | 'running' | 'complete' | 'failed' | 'skipped';
 
