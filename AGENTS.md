@@ -11,21 +11,17 @@
 | **Does NOT own** | Agent definitions (→ each layer), skill logic (→ each layer), game generation pipeline (→ gamebuilder/phasertemplate/playground) |
 | **Users** | All layers (transparently via hook interception) |
 
-## Navigation
-
-↑ Parent: [`../AGENTS.md`](../AGENTS.md)
-
 ## Plugin Installation
 
 ```bash
+# Clone the plugin
+git clone https://github.com/Base67-AI/temporal-plugin.git
+
 # Option 1: Load for a single session
-claude --plugin-dir ./temporal
+claude --plugin-dir ./temporal-plugin
 
-# Option 2: Install at project scope (persists across sessions)
-# Register this directory as a plugin source in .claude/settings.json
-
-# Option 3: Standalone (without plugin system)
-cd temporal && npm install && npm run build
+# Option 2: Standalone (without plugin system)
+cd temporal-plugin && npm install && npm run build
 ```
 
 Once loaded as a plugin, the hooks, skills, and agents auto-register — no manual settings.json changes needed.
@@ -52,7 +48,6 @@ If the Temporal server or worker isn't running, the hook passes through silently
 ## Plugin Structure
 
 ```
-temporal/
 ├── .claude-plugin/
 │   └── plugin.json          # Plugin manifest (name, version, description)
 ├── hooks/
@@ -121,13 +116,13 @@ temporal/
 temporal server start-dev
 
 # 2. Install dependencies and build
-cd temporal && npm install && npm run build
+npm install && npm run build
 
 # 3. Start worker
 npm run worker
 
 # 4. Load plugin in Claude Code
-claude --plugin-dir ./temporal
+claude --plugin-dir /path/to/temporal-plugin
 # The hooks auto-activate when Temporal is available
 ```
 
